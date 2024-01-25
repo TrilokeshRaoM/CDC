@@ -1,0 +1,108 @@
+version: '3'
+services:
+  # postgres:
+  #   image: postgres:13.7
+  #   networks:
+  #     - cdcnet
+  #   environment:
+  #     - POSTGRES_PASSWORD=postgres#password
+  #     - PGDATA=/var/lib/postgresql/data/pgdata
+  #   volumes:
+  #     - "./psql/data:/var/lib/postgresql/data"
+  #     - "./psql/sql/:/docker-entrypoint-initdb.d/"
+  #     - "./psql/postgresql.conf:/var/lib/postgresql/conf/postgresql.conf"
+  #   command: [ "postgres", "-c", "config_file=/var/lib/postgresql/conf/postgresql.conf" ]
+  #   ports:
+  #     - "5432:5432"
+ 
+  # mysql:
+  #   image: mysql:8.0.27
+  #   networks:
+  #     - cdcnet
+  #   environment:
+  #     - MYSQL_ROOT_PASSWORD=my#sqlpassword
+  #     - MYSQL_DATABASE=cdc_test
+  #   volumes:
+  #     - "./mysql/data:/var/lib/mysql"
+  #     - "./mysql/sql:/docker-entrypoint-initdb.d"
+  #   ports:
+  #     - "3306:3306"
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    networks:
+      - cdcnet
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=My#mssqlpassw0rd
+      - MSSQL_AGENT_ENABLED=true
+    volumes:
+      - "./mssql/data:/var/opt/mssql"
+      - "./mssql/init.sql:/init.sql"
+      - "./mssql/run.sh:/run.sh"
+    ports:
+      - "1433:1433"
+    entrypoint: /run.sh
+
+  zookeeper:
+    image: debezium/zookeeper:1.9
+    networks:
+      - cdcnet
+    ports:
+      - "2181:2181"
+      - "2888:2888"
+      - "3888:3888"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka:
+    image: debezium/kafka:1.9
+    deploy:
+      resources:
+        limits:
+          memory: "6g"
+    networks:
+      - cdcnet
+    ports:
+      - "29092:29092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      # ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+  kafka_ui:
+    image: provectuslabs/kafka-ui:latest
+    networks:
+      - cdcnet
+    ports:
+      - "8080:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+      - KAFKA_CLUSTERS_0_NAME=local
+    depends_on:
+      - kafka
+
+  kafka_connect:
+    image: debezium/connect:1.9
+    networks:
+      - cdcnet
+    ports:
+      - "8083:8083"
+    depends_on:
+      - kafka
+    environment:
+      - CONFIG_STORAGE_TOPIC=psql_connect_configs
+      - OFFSET_STORAGE_TOPIC=psql_connect_offsets
+      - STATUS_STORAGE_TOPIC=psql_connect_statuses
+      - GROUP_ID=1
+      - BOOTSTRAP_SERVERS=kafka:9092
+
+networks:
+  cdcnet:
+    #    external: true
